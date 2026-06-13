@@ -306,7 +306,17 @@ def format_token_count_compact(*args, **kwargs):
                 text = text.rstrip("0").rstrip(".")
             return f"{sign}{text}{suffix}"
 
-    return f"{value:,}"
+
+def _compact_cwd() -> str:
+    """Return current working directory, compacted for status bar display.
+
+    Long paths are truncated to ~30 chars: ``/data/ro3.../SafeDepot``.
+    """
+    cwd = os.getcwd()
+    if len(cwd) <= 32:
+        return cwd
+    # Keep first component (/) and last 28 chars, insert ellipsis
+    return f"{cwd[0]}" + ".../" + cwd.rsplit("/", 1)[-1]
 
 
 realign_markdown_tables = _lazy_shim("agent.markdown_tables", "realign_markdown_tables")

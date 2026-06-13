@@ -187,7 +187,7 @@ class CLIStatusBarMixin:
         return f"✓ {format_duration_compact(max(0.0, time.time() - last_finished_at))}"
 
     def _get_status_bar_snapshot(self) -> Dict[str, Any]:
-        from cli import _reverse_alias_for_display, datetime, format_duration_compact
+        from cli import _compact_cwd, _reverse_alias_for_display, datetime, format_duration_compact
         agent = getattr(self, "agent", None)
         # Prefer the agent's model name — it updates on fallback; self.model never changes.
         model_name = (getattr(agent, "model", None) or self.model or "unknown")
@@ -228,6 +228,8 @@ class CLIStatusBarMixin:
             "battery_category": "dim",
             "focus_label": "",  # /focus badge: the reduced-output mode is never invisible.
             "git_branch": "",
+            # Compact cwd for status bar: /data/ro3.../SafeDepot when path is long
+            "cwd": _compact_cwd(),
             "goal_active": False,
             "goal_turns_used": 0,
             "goal_max_turns": 0}
@@ -1033,6 +1035,11 @@ class CLIStatusBarMixin:
             if count:
                 add(name, style(count) if callable(style) else style, f"{glyph} {count}")
 
+        if width >= 76:
+            # Wide tier only: narrow/medium bars keep their upstream shape (no cwd).
+            cwd = snapshot.get("cwd") or ""
+            if cwd:
+                add("cwd", _DIM, f"📁 {cwd}")
         if _ok("model"):
             if styled:
                 segs.append([(_SB, " ☤ "), (_STRONG, model_short)])
