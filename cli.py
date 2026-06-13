@@ -192,7 +192,17 @@ def format_token_count_compact(*args, **kwargs):
                 text = text.rstrip("0").rstrip(".")
             return f"{sign}{text}{suffix}"
 
-    return f"{value:,}"
+
+def _compact_cwd() -> str:
+    """Return current working directory, compacted for status bar display.
+
+    Long paths are truncated to ~30 chars: ``/data/ro3.../SafeDepot``.
+    """
+    cwd = os.getcwd()
+    if len(cwd) <= 32:
+        return cwd
+    # Keep first component (/) and last 28 chars, insert ellipsis
+    return f"{cwd[0]}" + ".../" + cwd.rsplit("/", 1)[-1]
 
 
 def is_table_divider(*args, **kwargs):
@@ -6543,6 +6553,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             # Focus view badge (/focus). Persistent indicator so the reduced
             # output mode is never invisible. Display-only.
             "focus_label": "",
+            # Compact cwd for status bar: /data/ro3.../SafeDepot when path is long
+            "cwd": _compact_cwd(),
         }
 
         try:
@@ -7544,6 +7556,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                 return self._right_align_status_title(" · ".join(parts), session_title, width)
 
             parts = []
+            if _ok("cwd") and snapshot.get("cwd"):
+                parts.append(f"📁 {snapshot['cwd']}")
             if _ok("model"):
                 parts.append(f"⚕ {snapshot['model_short']}")
             if _ok("context_detail"):
@@ -7705,9 +7719,20 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                     bg_proc_count = snapshot.get("active_background_processes", 0)
                     bg_subagent_count = snapshot.get("active_background_subagents", 0)
                     frags = []
+                    if _ok("cwd") and snapshot.get("cwd"):
+                        _append(
+                            frags,
+                            " │ ",
+                            ("class:status-bar-dim", " 📁 "),
+                            ("class:status-bar-dim", snapshot["cwd"]),
+                        )
                     if _ok("model"):
-                        frags.append(("class:status-bar", " ⚕ "))
-                        frags.append(("class:status-bar-strong", snapshot["model_short"]))
+                        _append(
+                            frags,
+                            " │ ",
+                            ("class:status-bar", " ⚕ "),
+                            ("class:status-bar-strong", snapshot["model_short"]),
+                        )
                     if _ok("context_detail"):
                         if snapshot["context_length"]:
                             ctx_total = _format_context_length(snapshot["context_length"])
