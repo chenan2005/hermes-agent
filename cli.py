@@ -189,7 +189,17 @@ def format_token_count_compact(*args, **kwargs):
                 text = text.rstrip("0").rstrip(".")
             return f"{sign}{text}{suffix}"
 
-    return f"{value:,}"
+
+def _compact_cwd() -> str:
+    """Return current working directory, compacted for status bar display.
+
+    Long paths are truncated to ~30 chars: ``/data/ro3.../SafeDepot``.
+    """
+    cwd = os.getcwd()
+    if len(cwd) <= 32:
+        return cwd
+    # Keep first component (/) and last 28 chars, insert ellipsis
+    return f"{cwd[0]}" + ".../" + cwd.rsplit("/", 1)[-1]
 
 
 def is_table_divider(*args, **kwargs):
@@ -6307,6 +6317,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             # Focus view badge (/focus). Persistent indicator so the reduced
             # output mode is never invisible. Display-only.
             "focus_label": "",
+            # Compact cwd for status bar: /data/ro3.../SafeDepot when path is long
+            "cwd": _compact_cwd(),
         }
 
         try:
@@ -7034,7 +7046,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             yolo_active = self._is_session_yolo_active()
             goal_segment = self._status_bar_goal_segment(snapshot)
             if width < 52:
-                text = f"{battery_prefix}⚕ {snapshot['model_short']} · {duration_label}"
+                text = f"📁 {snapshot['cwd']} · ⚕ {snapshot['model_short']} · {duration_label}"
                 if goal_segment:
                     text += f" · {goal_segment}"
                 if focus_label:
@@ -7043,7 +7055,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                     text += " · ⚠ YOLO"
                 return self._right_align_status_title(text, session_title, width)
             if width < 76:
-                parts = [f"⚕ {snapshot['model_short']}", percent_label]
+                parts = [f"📁 {snapshot['cwd']}", f"⚕ {snapshot['model_short']}", percent_label]
                 if battery_label:
                     parts.insert(0, battery_label)
                 compressions = snapshot.get("compressions", 0)
@@ -7075,7 +7087,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                 context_label = "ctx --"
 
             compressions = snapshot.get("compressions", 0)
-            parts = [f"⚕ {snapshot['model_short']}", context_label, percent_label]
+            parts = [f"📁 {snapshot['cwd']}", f"⚕ {snapshot['model_short']}", context_label, percent_label]
             if battery_label:
                 parts.insert(0, battery_label)
             if compressions:
@@ -7127,6 +7139,9 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
 
             if width < 52:
                 frags = [
+                    ("class:status-bar-dim", " 📁 "),
+                    ("class:status-bar-dim", snapshot["cwd"]),
+                    ("class:status-bar-dim", " · "),
                     ("class:status-bar", " ⚕ "),
                     ("class:status-bar-strong", snapshot["model_short"]),
                     ("class:status-bar-dim", " · "),
@@ -7151,6 +7166,9 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                     bg_proc_count = snapshot.get("active_background_processes", 0)
                     bg_subagent_count = snapshot.get("active_background_subagents", 0)
                     frags = [
+                        ("class:status-bar-dim", " 📁 "),
+                        ("class:status-bar-dim", snapshot["cwd"]),
+                        ("class:status-bar-dim", " · "),
                         ("class:status-bar", " ⚕ "),
                         ("class:status-bar-strong", snapshot["model_short"]),
                         ("class:status-bar-dim", " · "),
@@ -7196,6 +7214,9 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                     bg_proc_count = snapshot.get("active_background_processes", 0)
                     bg_subagent_count = snapshot.get("active_background_subagents", 0)
                     frags = [
+                        ("class:status-bar-dim", " 📁 "),
+                        ("class:status-bar-dim", snapshot["cwd"]),
+                        ("class:status-bar-dim", " │ "),
                         ("class:status-bar", " ⚕ "),
                         ("class:status-bar-strong", snapshot["model_short"]),
                         ("class:status-bar-dim", " │ "),
