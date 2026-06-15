@@ -230,6 +230,20 @@ def _repair_tool_call_arguments(raw_args: str, tool_name: str = "?") -> str:
     except (json.JSONDecodeError, TypeError, ValueError):
         pass
 
+    # Repair pass 0.5: some reasoning/thinking models (e.g. deepseek-v4
+    # through litellm proxies) emit a leading {} delimiter before the
+    # actual tool-call JSON.  Strip it and retry before falling through
+    # to the heavier repair passes.
+    if raw_stripped.startswith("{}") and len(raw_stripped) > 2:
+        stripped = raw_stripped[2:]
+        logger.warning(
+            "Stripped leading {} reasoning delimiter from tool_call arguments "
+            "for %s: %s → %s",
+            tool_name, raw_stripped[:80], stripped[:80],
+        )
+        # Retry from the top with the stripped version (recurse once).
+        return _repair_tool_call_arguments(stripped, tool_name)
+
     # Attempt common JSON repairs
     fixed = raw_stripped
     # 1. Strip trailing commas before } or ]
