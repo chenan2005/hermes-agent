@@ -1006,6 +1006,72 @@ def web_search_tool(query: str, limit: int = 5) -> str:
         return tool_error(error_msg)
 
 
+def _browser_extract_fallback(urls: List[str]) -> Optional[List[Dict[str, Any]]]:
+    """Try extracting page content via local browser (Camofox or Chromium).
+
+    Called when the configured extract backend is search-only (ddgs,
+    brave-free, searxng) and Firecrawl is not available.
+
+    Returns a list of result dicts on success, None on failure (caller
+    should surface the original "search-only" error).
+    """
+    try:
+        from tools.browser_tool import browser_navigate, browser_console
+        import json as _json
+
+        results: List[Dict[str, Any]] = []
+        for url in urls:
+            # Navigate to the page
+            nav_result = _json.loads(browser_navigate(url))
+            if not nav_result.get("success"):
+                logger.debug(
+                    "Browser fallback navigate failed for %s: %s",
+                    url, nav_result.get("error", "unknown"),
+                )
+                continue
+
+            # Extract page text via JavaScript
+            js = (
+                'document.title + "\\n\\n" + '
+                '((document.body && document.body.innerText) || '
+                '(document.body && document.body.textContent) || "")'
+                '.substring(0, 50000)'
+            )
+            text_result = _json.loads(browser_console(expression=js))
+            if not text_result.get("success"):
+                logger.debug(
+                    "Browser fallback text extraction failed for %s", url
+                )
+                continue
+
+            page_text = text_result.get("result", "")
+            if not page_text or len(page_text) < 50:
+                continue
+
+            # Extract title from first line
+            lines = page_text.split("\n", 1)
+            title = lines[0].strip() if lines else ""
+            content = lines[1].strip() if len(lines) > 1 else page_text
+
+            logger.info(
+                "Browser fallback succeeded for %s (%d chars)",
+                url, len(content),
+            )
+            results.append({
+                "url": url,
+                "title": title,
+                "content": content,
+                "raw_content": content,
+                "metadata": {"sourceURL": url},
+                "fallback": "browser",
+            })
+
+        return results if results else None
+    except Exception as e:
+        logger.debug("Browser fallback failed: %s", e)
+        return None
+
+
 async def web_extract_tool(
     urls: List[Any],
     format: str = None,
@@ -1141,52 +1207,91 @@ async def web_extract_tool(
             if provider is None or not provider.supports_extract():
                 # When the configured name IS registered but doesn't support
                 # extract (search-only providers like brave-free / ddgs /
-                # searxng), surface that as a typed "search-only" error
-                # rather than silently switching backends. When the name
-                # isn't registered at all (typo / uninstalled plugin), fall
-                # through to the active-provider walk.
+                # searxng), try a three-tier fallback before reporting
+                # an error:
+                #   1. Try Firecrawl if configured/available
+                #   2. Try local browser (Camofox / Chromium)
+                #   3. Return "search-only" error if nothing works
                 if provider is not None and not provider.supports_extract():
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": (
-                                f"{provider.display_name} is a search-only "
-                                "backend and cannot extract URL content. "
-                                "Set web.extract_backend to firecrawl, "
-                                "tavily, exa, or parallel."
-                            ),
-                        },
-                        ensure_ascii=False,
-                    )
-                from tools.tool_backend_helpers import (
-                    selection_error,
-                    selection_exists,
-                )
-
-                if backend and selection_exists("web"):
-                    # Strict selection: a stored-but-unregistered backend
-                    # errors by name instead of silently switching to
-                    # whatever the availability walk finds.
-                    disabled_key = _disabled_web_plugin_for(capability="extract")
-                    if disabled_key:
-                        _vendor = disabled_key.split("/", 1)[-1]
-                        error_text = (
-                            f"web.extract_backend is set to '{_vendor}', but "
-                            f"its plugin ('{disabled_key}') is disabled in "
-                            f"config. Re-enable it with `hermes plugins "
-                            f"enable {disabled_key}` (or remove it from "
-                            "plugins.disabled)."
+                    # Tier 1: Firecrawl
+                    firecrawl_provider = _wsp_get_provider("firecrawl")
+                    if (
+                        firecrawl_provider is not None
+                        and firecrawl_provider.supports_extract()
+                        and firecrawl_provider.is_available()
+                    ):
+                        logger.info(
+                            "Search-only backend (%s), Firecrawl available "
+                            "— delegating",
+                            backend,
                         )
+                        provider = firecrawl_provider
                     else:
-                        error_text = selection_error(
-                            "web",
-                            f"'{backend}'",
-                            "no registered web extract provider has that name",
+                        # Tier 2: local browser fallback
+                        logger.info(
+                            "Search-only backend (%s), Firecrawl not "
+                            "available — trying browser fallback for %d "
+                            "URL(s)",
+                            backend, len(safe_urls),
                         )
-                    return json.dumps(
-                        {"success": False, "error": error_text},
-                        ensure_ascii=False,
-                    )
+                        browser_results = _browser_extract_fallback(safe_urls)
+                        if browser_results:
+                            return json.dumps(
+                                {"success": True, "results": browser_results},
+                                ensure_ascii=False,
+                            )
+                        # Tier 3: strict selection errors (upstream #40190
+                        # follow-up), then original search-only error
+                        from tools.tool_backend_helpers import (
+                            selection_error,
+                            selection_exists,
+                        )
+
+                        if backend and selection_exists("web"):
+                            # Strict selection: a stored-but-unregistered
+                            # backend errors by name instead of silently
+                            # switching to whatever the availability walk
+                            # finds.
+                            disabled_key = _disabled_web_plugin_for(
+                                capability="extract"
+                            )
+                            if disabled_key:
+                                _vendor = disabled_key.split("/", 1)[-1]
+                                error_text = (
+                                    f"web.extract_backend is set to "
+                                    f"'{_vendor}', but its plugin "
+                                    f"('{disabled_key}') is disabled in "
+                                    f"config. Re-enable it with `hermes "
+                                    f"plugins enable {disabled_key}` (or "
+                                    "remove it from plugins.disabled)."
+                                )
+                            else:
+                                error_text = selection_error(
+                                    "web",
+                                    f"'{backend}'",
+                                    "no registered web extract provider "
+                                    "has that name",
+                                )
+                            return json.dumps(
+                                {"success": False, "error": error_text},
+                                ensure_ascii=False,
+                            )
+                        # Original search-only error
+                        return json.dumps(
+                            {
+                                "success": False,
+                                "error": (
+                                    f"{provider.display_name} is a "
+                                    "search-only backend and cannot extract "
+                                    "URL content.  Firecrawl is not "
+                                    "configured and the local browser "
+                                    "fallback also failed.  Set "
+                                    "web.extract_backend to firecrawl, "
+                                    "tavily, exa, or parallel."
+                                ),
+                            },
+                            ensure_ascii=False,
+                        )
                 provider = get_active_extract_provider()
                 if provider is None:
                     # If the configured backend is a bundled web plugin the
