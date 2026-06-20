@@ -348,6 +348,72 @@ def _memoized_search(provider, query: str, limit: int) -> dict:
     return slice_search_response(response_data, limit)
 
 
+def _browser_extract_fallback(urls: List[str]) -> Optional[List[dict]]:
+    """Try extracting page content via local browser (Camofox or Chromium).
+
+    Called when the configured extract backend is search-only (ddgs,
+    brave-free, searxng) and Firecrawl is not available.
+
+    Returns a list of result dicts on success, None on failure (caller
+    should surface the original "search-only" error).
+    """
+    try:
+        from tools.browser_tool import browser_navigate, browser_console
+        import json as _json
+
+        results: List[dict] = []
+        for url in urls:
+            # Navigate to the page
+            nav_result = _json.loads(browser_navigate(url))
+            if not nav_result.get("success"):
+                logger.debug(
+                    "Browser fallback navigate failed for %s: %s",
+                    url, nav_result.get("error", "unknown"),
+                )
+                continue
+
+            # Extract page text via JavaScript
+            js = (
+                'document.title + "\\n\\n" + '
+                '((document.body && document.body.innerText) || '
+                '(document.body && document.body.textContent) || "")'
+                '.substring(0, 50000)'
+            )
+            text_result = _json.loads(browser_console(expression=js))
+            if not text_result.get("success"):
+                logger.debug(
+                    "Browser fallback text extraction failed for %s", url
+                )
+                continue
+
+            page_text = text_result.get("result", "")
+            if not page_text or len(page_text) < 50:
+                continue
+
+            # Extract title from first line
+            lines = page_text.split("\n", 1)
+            title = lines[0].strip() if lines else ""
+            content = lines[1].strip() if len(lines) > 1 else page_text
+
+            logger.info(
+                "Browser fallback succeeded for %s (%d chars)",
+                url, len(content),
+            )
+            results.append({
+                "url": url,
+                "title": title,
+                "content": content,
+                "raw_content": content,
+                "metadata": {"sourceURL": url},
+                "fallback": "browser",
+            })
+
+        return results if results else None
+    except Exception as e:
+        logger.debug("Browser fallback failed: %s", e)
+        return None
+
+
 async def web_extract_tool(urls: List[Any], format: str = None, char_limit: Optional[int] = None) -> str:
     """Extract clean page content (no LLM) from URLs via the configured backend.
 
@@ -381,9 +447,59 @@ async def web_extract_tool(urls: List[Any], format: str = None, char_limit: Opti
         if safe_urls:
             backend = _get_extract_backend()
             _ensure_web_plugins_loaded()
-            provider, error_json = _resolve_extract_provider(backend)
-            if error_json is not None:
-                return error_json
+            # Search-only configured backend (ddgs / brave-free / searxng):
+            # try a three-tier fallback before reporting an error:
+            #   1. Try Firecrawl if configured/available
+            #   2. Try local browser (Camofox / Chromium)
+            #   3. Return "search-only" error if nothing works
+            from agent.web_search_registry import get_provider as _wsp_get_provider
+
+            _selected = _wsp_get_provider(backend) if backend else None
+            if _selected is not None and not _selected.supports_extract():
+                # Tier 1: Firecrawl
+                firecrawl_provider = _wsp_get_provider("firecrawl")
+                if (
+                    firecrawl_provider is not None
+                    and firecrawl_provider.supports_extract()
+                    and firecrawl_provider.is_available()
+                ):
+                    logger.info(
+                        "Search-only backend (%s), Firecrawl available — delegating",
+                        backend,
+                    )
+                    provider = firecrawl_provider
+                else:
+                    # Tier 2: local browser fallback
+                    logger.info(
+                        "Search-only backend (%s), Firecrawl not available — "
+                        "trying browser fallback for %d URL(s)",
+                        backend, len(safe_urls),
+                    )
+                    browser_results = _browser_extract_fallback(safe_urls)
+                    if browser_results:
+                        return json.dumps(
+                            {"success": True, "results": browser_results},
+                            ensure_ascii=False,
+                        )
+                    # Tier 3: original search-only error
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": (
+                                f"{_selected.display_name} is a search-only "
+                                "backend and cannot extract URL content. "
+                                "Firecrawl is not configured and the local "
+                                "browser fallback also failed. "
+                                "Set web.extract_backend to firecrawl, "
+                                "keenable, exa, or parallel."
+                            ),
+                        },
+                        ensure_ascii=False,
+                    )
+            else:
+                provider, error_json = _resolve_extract_provider(backend)
+                if error_json is not None:
+                    return error_json
             results = await _extract_safe_urls(provider, safe_urls, format)
         # Reconstruct input order across invalid, blocked, and provider entries (providers preserve
         # the order of the safe URL list they receive).
