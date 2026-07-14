@@ -3889,6 +3889,17 @@ def compress_context(
                     old_session_id=_boundary_parent,
                 )
 
+        # Flush pending memory retains BEFORE the compaction boundary so
+        # in-flight sync_all() calls complete and land in the old session's
+        # document. Without this, turns buffered after the last retain but
+        # before compaction fires are lost when on_session_switch clears
+        # the provider's _session_turns buffer. See #64315.
+        try:
+            if agent._memory_manager:
+                agent._memory_manager.flush_pending(timeout=5.0)
+        except Exception as _fp_err:
+            logger.debug("memory flush before compaction: %s", _fp_err)
+
         # Notify memory providers of the compaction boundary so provider-cached
         # per-session state (Hindsight's _document_id, accumulated turn buffers,
         # counters) refreshes. reset=False because the logical conversation
