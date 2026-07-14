@@ -3085,6 +3085,14 @@ def _finish_compaction_boundary(
         )
         notify(agent, new_session_id=agent.session_id or "", old_session_id=_boundary_parent)
 
+    # Flush pending memory retains BEFORE the compaction boundary so in-flight
+    # sync_all() calls complete and land in the old session's document; turns
+    # buffered after the last retain would otherwise be lost when
+    # on_session_switch clears the provider's _session_turns buffer. See #64315.
+    with _swallow("memory flush before compaction: %s"):
+        if agent._memory_manager:
+            agent._memory_manager.flush_pending(timeout=5.0)
+
     # Providers refresh cached per-session state; reset=False, conversation goes on.
     # Fires in BOTH modes so buffers don't double-count dropped turns in-place.
     with _swallow('memory manager on_session_switch (compression): %s'):
