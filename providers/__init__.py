@@ -75,7 +75,10 @@ def get_provider_profile(name: str) -> ProviderProfile | None:
     if not _discovered:
         _discover_providers()
     canonical = _ALIASES.get(name, name)
-    return _REGISTRY.get(canonical)
+    profile = _REGISTRY.get(canonical)
+    if profile is None and canonical.startswith("custom:"):
+        return _REGISTRY.get("custom")
+    return profile
 
 
 def list_providers() -> list[ProviderProfile]:
