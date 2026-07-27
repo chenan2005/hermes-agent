@@ -272,6 +272,34 @@ def _set_process_title() -> None:
         pass
 
 
+def _set_terminal_title() -> None:
+    """Set the terminal tab/window title so users can spot the Hermes tab at a
+    glance (same idea as Claude's tab branding).
+
+    Purely cosmetic — non-fatal on any platform.  Only emits when stdout is a
+    TTY (pipe-safe).
+
+    Sequence strategy:
+      - OSC 0 (BEL-terminated): window + tab title, most widely supported.
+        An emoji prefix gives visual distinction in tabs — the closest
+        equivalent to a tab icon when the terminal's profile icon is static
+        (e.g. Windows Terminal, where the profile icon is a settings.json
+        field and cannot be changed dynamically via escape sequences).
+      - OSC 1 (ST-terminated): icon name for terminals that honour it
+        (iTerm2, some Linux terminals).  Windows Terminal ignores this.
+    """
+    if not os.isatty(1):
+        return
+    try:
+        # ⚡ = U+26A1 HIGH VOLTAGE SIGN — clean monochrome emoji that renders
+        # well at small tab sizes across Windows Terminal, iTerm2, and Kitty.
+        # BEL terminator (\a) for OSC 0 — broader compatibility than ST.
+        os.write(1, b"\x1b]0;\xe2\x9a\xa1 Hermes\a")      # title (BEL)
+        os.write(1, b"\x1b]1;\xe2\x9a\xa1 Hermes\x1b\\")  # icon name (ST)
+    except OSError:
+        pass
+
+
 # Cheap, dependency-free read of `display.interface` from config.yaml for the
 # earliest hot-path decisions (mouse-residue suppression, Termux fast launch)
 # that run *before* hermes_cli.config is importable. Mirrors the explicit
@@ -12673,6 +12701,11 @@ def main():
     # Let child processes (and tools like huggingface_hub) detect they run
     # under an AI agent harness.
     _advertise_agent_env()
+
+    # Set the terminal tab/window title so users can spot the Hermes tab at a
+    # glance (same idea as Claude's tab icon).  Non-fatal — no-op when stdout
+    # is not a TTY.
+    _set_terminal_title()
 
     # Force UTF-8 stdio on Windows before anything prints.  No-op elsewhere.
     try:
