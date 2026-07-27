@@ -11,6 +11,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from dataclasses import dataclass
 import logging
+import os
 import time
 from typing import Any, Dict, Optional
 
@@ -45,6 +46,9 @@ def _should_stream(agent: Any) -> bool:
     checks); disabled on provider signal, ACP schemes, MoA without a display consumer, or
     Mock clients in tests (SimpleNamespace, not stream iterators)."""
     if getattr(agent, "_disable_streaming", False):
+        return False
+    # Site customization: HERMES_DISABLE_STREAMING env kill-switch.
+    if os.getenv("HERMES_DISABLE_STREAMING"):
         return False
     _base = str(agent.base_url or "").lower()
     if agent.provider in {"copilot-acp"} or _base.startswith(("acp://", "acp+tcp://")):
