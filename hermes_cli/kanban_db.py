@@ -131,7 +131,7 @@ VALID_BLOCK_KINDS = {"dependency", "needs_input", "capability", "transient"}
 # human-in-the-loop decision. Mirrors the dispatcher's ``DEFAULT_FAILURE_LIMIT``
 # spirit (default 2) but counts a different signal: manual unblock recurrences,
 # not dispatcher spawn/crash/timeout failures.
-BLOCK_RECURRENCE_LIMIT = 2
+BLOCK_RECURRENCE_LIMIT = 30
 VALID_WORKSPACE_KINDS = {"scratch", "worktree", "dir"}
 
 
