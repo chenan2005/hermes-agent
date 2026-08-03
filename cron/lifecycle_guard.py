@@ -77,8 +77,12 @@ _GATEWAY_LIFECYCLE_PATTERN = re.compile(
     r"|(?:systemctl\s+(?:-\S+\s+)*(?:restart|stop|start)\b[^\n]*\bhermes[.\-]?gateway)"
     # Branch D: pkill / kill targeting the hermes gateway process. Both
     # token orders because real reproductions show both.
-    r"|(?:p?kill\b[^\n]*\bhermes\b[^\n]*\bgateway)"
-    r"|(?:p?kill\b[^\n]*\bgateway\b[^\n]*\bhermes)"
+    # `\bp?kill` (leading boundary) is required: without it, "SKILL.md" in a
+    # shell script would match as "KILL" + "hermes" + "gateway" on the same
+    # line (e.g. an archive MAPPING entry for hermes-dual-gateway-home),
+    # producing a false positive that blocks benign deploy scripts.
+    r"|(?:\bp?kill\b[^\n]*\bhermes\b[^\n]*\bgateway)"
+    r"|(?:\bp?kill\b[^\n]*\bgateway\b[^\n]*\bhermes)"
 )
 
 
@@ -423,8 +427,21 @@ def _iter_referenced_shell_scripts(
         if executable.strip("/"):
             if "/" in executable or executable.endswith((".sh", ".bash", ".zsh")):
                 resolved = _resolve_terminal_script_path(executable, cwd)
-                if resolved is not None:
+                # Only recurse into scripts that would actually be executed:
+                # shell extensions, or files with the exec bit. Data tokens like
+                # "memory/MEMORY.md" inside a bash array (e.g. an EXCLUDED list)
+                # are not commands — scanning them drags docs/config into the
+                # scan and false-positives on prose that merely describes the
+                # forbidden commands (2026-08-03: SOUL.md text "systemctl
+                # restart hermes-gateway" blocked a benign deploy script).
+                if executable.endswith((".sh", ".bash", ".zsh")):
                     yield resolved
+                else:
+                    try:
+                        if os.path.isfile(resolved) and os.access(resolved, os.X_OK):
+                            yield resolved
+                    except OSError:
+                        pass
 
 
 def _iter_shell_command_payloads(command: str) -> Iterator[str]:
@@ -486,6 +503,12 @@ def _read_referenced_script(path: Path) -> tuple[Optional[str], bool]:
         return None, False
     try:
         metadata = os.fstat(descriptor)
+        # Directory: not a script — no content to scan, skip (2026-08-03:
+        # a doc path like "(/data/.../ro3-pipeline-docs)" inside a referenced
+        # .md file resolved to a real directory and was wrongly treated as
+        # an unsafe script, blocking benign deploy scripts).
+        if stat.S_ISDIR(metadata.st_mode):
+            return None, False
         if not stat.S_ISREG(metadata.st_mode):
             # Directories are not scripts. Docker Desktop writes
             # ``fpath=(~/.docker/completions …)`` into ``~/.zshrc``; the
@@ -526,7 +549,13 @@ def _read_referenced_script(path: Path) -> tuple[Optional[str], bool]:
         return None, False
     if len(data) > _MAX_REFERENCED_SCRIPT_BYTES:
         return None, True
-    return data.decode("utf-8", errors="replace"), False
+    text = data.decode("utf-8", errors="replace")
+    # Binary content (e.g. a sqlite db path referenced from a .py string):
+    # not a shell script — scanning it is meaningless and its embedded NULs
+    # would crash Path.resolve() downstream. Skip like a directory.
+    if "\x00" in text:
+        return None, False
+    return text, False
 
 
 def _sanitize_remote_script_text(text: Optional[str]) -> tuple[Optional[str], bool]:
