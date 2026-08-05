@@ -239,7 +239,15 @@ class TurnRunner:
             adapter = None
         code_full, code_short = self._progress_terminal_blocks(adapter, tool_name, args, emoji)
         verbose = ctx.progress_mode == "verbose"
-        code = code_full if verbose else code_short
+        # Site customization: on Feishu, show the FULL command in non-verbose modes
+        # too — the mobile client auto-folds API cards, so a plain fenced block
+        # with the whole command is the only shape that needs no extra taps.
+        feishu_full = (
+            not verbose
+            and code_full is not None
+            and getattr(ctx.source, "platform", None) == Platform.FEISHU
+        )
+        code = code_full if (verbose or feishu_full) else code_short
         ctx.last_was_terminal_block[0] = code is not None
         if verbose:
             if code is None and args:

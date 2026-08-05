@@ -1349,7 +1349,7 @@ def _last_transcript_timestamp(history: Optional[List[Dict[str, Any]]]) -> Any:
 
 
 # Tool output may hold literal MEDIA: examples (docs, logs); only deliberate media producers may auto-append.
-_AUTO_APPEND_MEDIA_TOOL_NAMES = {"text_to_speech", "text_to_speech_tool", "image_generate"}
+_AUTO_APPEND_MEDIA_TOOL_NAMES = {"text_to_speech", "text_to_speech_tool", "image_generate", "terminal"}
 
 # Replay-tail sanitization lives in agent/replay_cleanup.py so every resume surface shares one implementation.
 from agent.replay_cleanup import (  # noqa: E402
@@ -1442,6 +1442,20 @@ def _collect_auto_append_media_tags(
                             and path not in history_media_paths):
                         media_tags.append(f"MEDIA:{path}")
                         break
+            continue
+        if tool_name == "terminal":
+            # Site customization: truncated terminal output spilled the full
+            # text to disk (``full_output_path``); attach that file natively so
+            # the user can open the untruncated output (Feishu/Telegram).
+            try:
+                payload = json.loads(content) if content else {}
+            except Exception:
+                payload = {}
+            if isinstance(payload, dict):
+                spill_path = payload.get("full_output_path")
+                if (isinstance(spill_path, str) and spill_path.strip()
+                        and spill_path not in history_media_paths):
+                    media_tags.append(f"MEDIA:{spill_path}")
             continue
         if "MEDIA:" not in content:
             continue

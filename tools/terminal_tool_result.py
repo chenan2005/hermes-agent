@@ -141,7 +141,8 @@ def _truncate_head_tail(output: str) -> str:
     head_chars = int(max_chars * 0.4)
     tail_chars = max_chars - head_chars
     notice = (f"\n\n... [OUTPUT TRUNCATED - {len(output) - head_chars - tail_chars} "
-              f"chars omitted out of {len(output)} total] ...\n\n")
+              f"chars omitted out of {len(output)} total] ...\n"
+              f"Full output attached as .txt file below.\n\n")
     return output[:head_chars] + notice + output[-tail_chars:]
 
 
