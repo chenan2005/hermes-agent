@@ -3610,13 +3610,15 @@ def terminal_tool(
             # Truncate output if too long, keeping both head and tail
             from tools.tool_output_limits import get_max_bytes
             MAX_OUTPUT_CHARS = get_max_bytes()
+            full_output = output
             if len(output) > MAX_OUTPUT_CHARS:
                 head_chars = int(MAX_OUTPUT_CHARS * 0.4)  # 40% head (error messages often appear early)
                 tail_chars = MAX_OUTPUT_CHARS - head_chars  # 60% tail (most recent/relevant output)
                 omitted = len(output) - head_chars - tail_chars
                 truncated_notice = (
                     f"\n\n... [OUTPUT TRUNCATED - {omitted} chars omitted "
-                    f"out of {len(output)} total] ...\n\n"
+                    f"out of {len(output)} total] ...\n"
+                    f"Full output attached as .txt file below.\n\n"
                 )
                 output = output[:head_chars] + truncated_notice + output[-tail_chars:]
 
@@ -3669,6 +3671,7 @@ def terminal_tool(
 
             result_dict = {
                 "output": output,
+                "full_output": full_output if len(full_output) > MAX_OUTPUT_CHARS else None,
                 "exit_code": returncode,
                 "error": None,
             }
