@@ -434,13 +434,28 @@ def _iter_referenced_shell_scripts(
                 # scan and false-positives on prose that merely describes the
                 # forbidden commands (2026-08-03: SOUL.md text "systemctl
                 # restart hermes-gateway" blocked a benign deploy script).
+                # Exception: cloud-backed paths (macOS FileProvider placeholders)
+                # must be yielded regardless of exec bit — the downstream cloud
+                # check fails closed without opening them, and skipping them
+                # would let a launcher symlink into an evicted placeholder
+                # bypass the guard entirely (#88052).
                 if executable.endswith((".sh", ".bash", ".zsh")):
                     yield resolved
                 else:
                     try:
-                        if os.path.isfile(resolved) and os.access(resolved, os.X_OK):
-                            yield resolved
-                    except OSError:
+                        if resolved is not None:
+                            # Local launcher that is a symlink into a cloud
+                            # subtree: resolve before the cloud check, or the
+                            # launcher path itself (tmp/bin/helper) won't look
+                            # cloud-backed and the fail-closed yield is missed
+                            # (#88052 test: launcher.symlink_to(cloud_target)).
+                            real = resolved.resolve(strict=False)
+                            if _is_cloud_placeholder_path(real) or (
+                                os.path.isfile(resolved)
+                                and os.access(resolved, os.X_OK)
+                            ):
+                                yield resolved
+                    except (OSError, ValueError):
                         pass
 
 
