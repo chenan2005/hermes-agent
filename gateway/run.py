@@ -4095,6 +4095,18 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
         raw = _normalize_root_model_keys(raw)
     except Exception:
         pass
+    # Expand ${env:VAR} / ${VAR} refs so gateway runtime reads (model,
+    # auxiliary, compression, plugins, ...) match load_config() semantics.
+    # _expand_env_vars leaves unresolved refs verbatim (fail-open) — an unset
+    # variable still surfaces as the literal. Wired into _load_gateway_config
+    # (not just callers) so every consumer sees expanded values; idempotent for
+    # already-literal configs. (2026-08-26 local patch: gateway raw path
+    # previously returned unexpanded refs → model "${env:MODEL_DEFAULT}" → 404.)
+    try:
+        from hermes_cli.config import _expand_env_vars
+        raw = _expand_env_vars(raw)
+    except Exception:
+        pass
     return raw
 
 
