@@ -269,7 +269,12 @@ class TurnRunner:
             adapter = None
         code_full, code_short = self._progress_terminal_blocks(adapter, tool_name, args, emoji)
         verbose = ctx.progress_mode == "verbose"
-        code = code_full if verbose else code_short
+        # Feishu: render the FULL command as a plain code block -- the mobile client
+        # auto-folds API cards and even expanding doesn't show full content; plain
+        # markdown code blocks don't get auto-folded, so the user sees the whole
+        # command without downloading an attachment.
+        feishu_full = getattr(adapter, "platform", None) == Platform.FEISHU
+        code = code_full if (verbose or feishu_full) else code_short
         ctx.last_was_terminal_block[0] = code is not None
         if verbose:
             if code is None and args:

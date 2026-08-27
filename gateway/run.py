@@ -1374,7 +1374,7 @@ def _last_transcript_timestamp(history: Optional[List[Dict[str, Any]]]) -> Any:
 
 
 # Tool output may hold literal MEDIA: examples (docs, logs); only deliberate media producers may auto-append.
-_AUTO_APPEND_MEDIA_TOOL_NAMES = {"text_to_speech", "text_to_speech_tool", "image_generate"}
+_AUTO_APPEND_MEDIA_TOOL_NAMES = {"text_to_speech", "text_to_speech_tool", "image_generate", "terminal"}
 
 # Replay-history canonicalization lives in agent/replay_cleanup.py so every resume
 # surface and the send path share one implementation.
@@ -1467,6 +1467,25 @@ def _collect_auto_append_media_tags(
                             and path not in history_media_paths):
                         media_tags.append(f"MEDIA:{path}")
                         break
+        if tool_name == "terminal":
+            # Truncated terminal output: save the full untruncated output to a
+            # .txt file and append a MEDIA: tag so the adapter delivers it as
+            # a native attachment (Feishu/Telegram/...). The tool result JSON
+            # carries ``full_output`` (string) or ``full_output_path`` (spill
+            # file already written by the tool).
+            try:
+                payload = json.loads(content) if content else {}
+            except Exception:
+                payload = {}
+            media_path: Optional[str] = None
+            full_output = payload.get("full_output")
+            spill_path = payload.get("full_output_path")
+            if isinstance(full_output, str) and full_output.strip():
+                media_path = _save_terminal_full_output(full_output)
+            elif isinstance(spill_path, str) and spill_path.strip():
+                media_path = spill_path
+            if media_path and media_path not in history_media_paths:
+                media_tags.append(f"MEDIA:{media_path}")
             continue
         if "MEDIA:" not in content:
             continue
@@ -1478,6 +1497,26 @@ def _collect_auto_append_media_tags(
             has_voice_directive = True
 
     return media_tags, has_voice_directive
+
+
+def _save_terminal_full_output(full_output: str) -> Optional[str]:
+    """Persist truncated terminal output as a .txt file for attachment delivery.
+
+    Writes under ``<HERMES_HOME>/cache/terminal_full_output/`` with a
+    timestamped name. Returns the absolute path, or None on failure.
+    """
+    try:
+        from hermes_constants import get_hermes_home
+        import datetime
+        hermes_home = get_hermes_home()
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_dir = hermes_home / "cache" / "terminal_full_output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"terminal_{timestamp}.txt"
+        out_path.write_text(full_output, encoding="utf-8")
+        return str(out_path.absolute())
+    except Exception:
+        return None
 
 
 def _collect_history_media_paths(agent_history: List[Dict[str, Any]]) -> set:
