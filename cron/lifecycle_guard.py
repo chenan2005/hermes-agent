@@ -294,6 +294,47 @@ _MAX_REFERENCED_SCRIPT_DEPTH = 8
 _CONTROL_CHARS = frozenset(";&|()")
 
 
+# Trusted-path prefixes for the referenced-script walk (site customization,
+# 2026-08-28): comma-separated in HERMES_LIFECYCLE_GUARD_TRUSTED_PREFIXES.
+# A referenced file (or any ancestor dir) under one of these prefixes is NOT
+# recursively scanned for lifecycle text. This exists because the walk is
+# conservative-by-design: a doc/reference file that merely *mentions* a
+# lifecycle command (e.g. SOUL.md describing "systemctl restart
+# hermes-gateway*" as the blocked pattern) can otherwise pin a benign script
+# that only diff-checks against it. Direct-command scanning is UNAFFECTED —
+# only the recursive content walk is skipped, so `systemctl restart
+# hermes-gateway*` typed directly is still blocked.
+_TRUSTED_PREFIX_CACHE: Optional[tuple[str, ...]] = None
+
+
+def _trusted_script_prefixes() -> tuple[str, ...]:
+    global _TRUSTED_PREFIX_CACHE
+    if _TRUSTED_PREFIX_CACHE is None:
+        raw = os.environ.get("HERMES_LIFECYCLE_GUARD_TRUSTED_PREFIXES", "")
+        _TRUSTED_PREFIX_CACHE = tuple(
+            p for p in raw.split(",") if p.strip()
+        )
+    return _TRUSTED_PREFIX_CACHE
+
+
+def _is_trusted_script_path(path: Path) -> bool:
+    """True when *path* (or an ancestor) sits under a trusted prefix.
+
+    Prefixes are compared literally (no resolve()), mirroring how the
+    walk passes real resolved paths around; comparing resolved paths would
+    re-follow symlinks and could escape the trust boundary. A prefix that
+    is a file path (not a dir) also works: exact path match.
+    """
+    trusted = _trusted_script_prefixes()
+    if not trusted:
+        return False
+    text = str(path)
+    for prefix in trusted:
+        if text == prefix or text.startswith(prefix.rstrip("/") + "/"):
+            return True
+    return False
+
+
 # Directory names that sit directly under a `Library` path component and
 # mark a FileProvider-backed subtree: `Mobile Documents` is iCloud Drive;
 # `CloudStorage` hosts every third-party FileProvider domain (Dropbox,
@@ -1069,6 +1110,12 @@ def _contains_unsafe_gateway_action(
         if resolved in visited:
             continue
         visited.add(resolved)
+        # Trusted-path skip (site customization, 2026-08-28): a referenced
+        # file under a trusted prefix is NOT recursively content-scanned.
+        # Direct-command scanning already ran at the top of this function,
+        # so this only relaxes the *walk*, never the direct verdict.
+        if _is_trusted_script_path(resolved):
+            continue
         script_text, unsafe = _read_referenced_script(script_path)
         if unsafe:
             return True
