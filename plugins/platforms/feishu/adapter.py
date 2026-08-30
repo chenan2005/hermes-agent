@@ -4385,6 +4385,12 @@ class FeishuAdapter(BasePlatformAdapter):
             mentions=getattr(message, "mentions", None),
             bot=self._bot_identity(),
         )
+        logger.info(
+            "[Feishu] DIAG raw_type=%s raw_content=%r media_refs=%r",
+            raw_type,
+            raw_content[:500],
+            [(m.file_key, m.file_name) for m in normalized.media_refs],
+        )
         media_urls, media_types = await self._download_feishu_message_resources(
             message_id=message_id,
             normalized=normalized,
