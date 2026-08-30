@@ -3548,18 +3548,28 @@ class FeishuAdapter(BasePlatformAdapter):
         raw_type = getattr(message, "message_type", "") or ""
         message_id = str(getattr(message, "message_id", "") or "")
         logger.info("[Feishu] Received raw message type=%s message_id=%s", raw_type, message_id)
-        normalized = self._normalize(raw_type, raw_content, getattr(message, "mentions", None))
-        logger.info(
-            "[Feishu] DIAG raw_type=%s raw_content=%r media_refs=%r",
-            raw_type,
-            raw_content[:500],
-            [(m.file_key, m.file_name) for m in normalized.media_refs],
+        normalized = self._normalize(
+            raw_type, raw_content, getattr(message, "mentions", None),
         )
         media_urls, media_types = await self._download_feishu_message_resources(
             message_id=message_id, normalized=normalized,
         )
         inbound_type = self._resolve_normalized_message_type(normalized, media_types)
         text = normalized.text_content
+        if normalized.media_refs and not media_urls:
+            # Every media resource failed to download (e.g. >100MB Feishu
+            # limit → error 234037). Surface it to the user instead of
+            # silently degrading the message into an empty one.
+            names = ", ".join(
+                m.file_name for m in normalized.media_refs if m.file_name
+            )
+            text = f"[附件下载失败：{names or '文件'}（可能超过飞书100MB下载限制）]"
+            logger.warning(
+                "[Feishu] All media downloads failed for message %s (%s); notifying user",
+                message_id,
+                names or "unnamed",
+            )
+
         media_text_inlined: List[bool] = []
         inlined_parts: List[str] = []
         for media_url, media_type in zip(media_urls, media_types):
@@ -3678,10 +3688,13 @@ class FeishuAdapter(BasePlatformAdapter):
                     message_id=message_id, file_key=file_key, resource_type=request_type,
                 )
                 if not response or not response.success():
-                    logger.debug(
-                        "[Feishu] Resource download failed for %s/%s via type=%s: %s %s",
-                        message_id, file_key, request_type,
-                        getattr(response, "code", "unknown"), getattr(response, "msg", "request failed"),
+                    logger.warning(
+                        "[Feishu] Resource download failed for %s/%s via type=%s: code=%s msg=%s",
+                        message_id,
+                        file_key,
+                        request_type,
+                        getattr(response, "code", "unknown"),
+                        getattr(response, "msg", "request failed"),
                     )
                     continue
                 raw_bytes = self._read_binary_response(response)
