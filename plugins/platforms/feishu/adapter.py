@@ -3400,6 +3400,12 @@ class FeishuAdapter(BasePlatformAdapter):
         message_id = str(getattr(message, "message_id", "") or "")
         logger.info("[Feishu] Received raw message type=%s message_id=%s", raw_type, message_id)
         normalized = self._normalize(raw_type, raw_content, getattr(message, "mentions", None))
+        logger.info(
+            "[Feishu] DIAG raw_type=%s raw_content=%r media_refs=%r",
+            raw_type,
+            raw_content[:500],
+            [(m.file_key, m.file_name) for m in normalized.media_refs],
+        )
         media_urls, media_types = await self._download_feishu_message_resources(
             message_id=message_id, normalized=normalized,
         )
