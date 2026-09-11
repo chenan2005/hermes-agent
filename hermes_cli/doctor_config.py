@@ -210,11 +210,24 @@ def _provider_has_credentials(runtime_provider: str) -> bool:
 
 
 def _validate_model_config(config_path, issues: list) -> None:
-    """Validate model.provider / model.default against the provider registry (raw file)."""
+    """Validate model.provider / model.default against the provider registry (raw file).
+
+    2026-09-12 local patch (share-env): expand ${env:} refs before validation so a
+    ``model.provider: ${env:PROVIDER_DEFAULT}`` ref validates against its resolved
+    value (same raw+expand pattern as doctor_state); also handle the legacy
+    bare-string ``model`` form (provider at root) instead of erroring out.
+    """
     # Detect stale root-level model keys (known bug source — PR #4329)
-    from hermes_cli.config import read_user_config_raw
-    cfg = read_user_config_raw(config_path)
+    from hermes_cli.config import _expand_env_vars, read_user_config_raw
+    cfg = _expand_env_vars(read_user_config_raw(config_path))
+    if not isinstance(cfg, dict):
+        cfg = {}
     model_section = cfg.get("model") or {}
+    if isinstance(model_section, str):
+        # Legacy form: bare-string model; the provider may sit at the root (pre-migration).
+        model_section = {"default": model_section, "provider": cfg.get("provider") or ""}
+    if not isinstance(model_section, dict):
+        model_section = {}
     provider_raw = (model_section.get("provider") or "").strip()
     provider = provider_raw.lower()
     default_model = (model_section.get("default") or model_section.get("model") or "").strip()
