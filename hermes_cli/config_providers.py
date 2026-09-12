@@ -309,11 +309,50 @@ def providers_dict_to_custom_providers(providers_dict: Any) -> List[Dict[str, An
     return custom_providers
 
 
+_SHARED_PROVIDERS_CACHE: Dict[str, Any] = {"key": None, "entries": []}
+
+
+def _load_shared_custom_providers() -> List[Dict[str, Any]]:
+    """Load centrally-managed provider entries from ``~/.hermes/shared-env/custom_providers.yaml``.
+
+    2026-09-12 local patch (share-env): one file defines custom providers shared by every
+    profile; merged read-only into ``get_compatible_custom_providers`` (never written back).
+    Missing file = no-op; result is mtime+size cached; failures degrade to [] so provider
+    resolution survives a bad shared file.
+    """
+    from pathlib import Path
+    path = Path.home() / ".hermes" / "shared-env" / "custom_providers.yaml"
+    try:
+        st = path.stat()
+        cache_key = (st.st_mtime_ns, st.st_size)
+        if _SHARED_PROVIDERS_CACHE["key"] == cache_key:
+            return _SHARED_PROVIDERS_CACHE["entries"]
+        import yaml
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):  # tolerate a wrapped ``custom_providers:`` form
+            data = data.get("custom_providers")
+        entries: List[Dict[str, Any]] = []
+        if isinstance(data, list):
+            entries = [n for n in (_normalize_custom_provider_entry(e) for e in data) if n is not None]
+        _SHARED_PROVIDERS_CACHE["key"] = cache_key
+        _SHARED_PROVIDERS_CACHE["entries"] = entries
+        return entries
+    except FileNotFoundError:
+        _SHARED_PROVIDERS_CACHE["key"] = None
+        _SHARED_PROVIDERS_CACHE["entries"] = []
+        return []
+    except Exception as exc:  # noqa: BLE001 — a bad shared file must never break resolution
+        logger.warning("share-env: could not load shared custom providers: %s", exc)
+        return []
+
+
 def get_compatible_custom_providers(
     config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Deduplicated list view over legacy ``custom_providers`` and v12+ ``providers``.
 
     Never materialised back into config.yaml (it would duplicate entries in UIs).
+    Share-env: shared entries (``~/.hermes/shared-env/custom_providers.yaml``) merge in
+    last as a read-only baseline; profile-local entries win by ``name``.
     """
     from hermes_cli.config import load_config
     if config is None:
@@ -324,6 +363,16 @@ def get_compatible_custom_providers(
         return []
     candidates = [_normalize_custom_provider_entry(e) for e in (custom_providers or [])]
     candidates += providers_dict_to_custom_providers(config.get("providers"))
+
+    # 2026-09-12 local patch (share-env): merge shared providers last; profile-local
+    # entries win by name (shared = baseline, profile = override / extension).
+    try:
+        shared = _load_shared_custom_providers()
+        if shared:
+            local_names = {str(e.get("name", "")).strip().lower() for e in candidates if isinstance(e, dict)}
+            candidates += [e for e in shared if str(e.get("name", "")).strip().lower() not in local_names]
+    except Exception:  # noqa: BLE001 — never break provider resolution
+        pass
 
     def _norm(entry: Dict[str, Any], field: str) -> str:
         return str(entry.get(field, "") or "").strip().lower()

@@ -673,21 +673,17 @@ _CONFIG_ERRORS = (ImportError, OSError, RuntimeError, TypeError, ValueError, Att
 
 
 def _configured_custom_provider_ids() -> set[str]:
-    """Return routable custom-provider IDs configured by the user."""
+    """Return routable custom-provider IDs configured by the user (incl. share-env shared)."""
     ids = {"custom"}
     try:
-        from hermes_cli.config import load_config
+        from hermes_cli.config import get_compatible_custom_providers
         from hermes_cli.providers import custom_provider_slug
 
-        config = load_config()
-        providers = config.get("providers", {})
-        if isinstance(providers, dict):
-            ids.update(custom_provider_slug(str(entry.get("name") or key), str(key))
-                       for key, entry in providers.items() if isinstance(entry, dict))
-        legacy = config.get("custom_providers", [])
-        if isinstance(legacy, list):
-            ids.update(
-                custom_provider_slug(str(entry.get("name") or "")) for entry in legacy if isinstance(entry, dict))
+        # 2026-09-12 local patch (share-env): use the compatible view so shared-file
+        # providers are routable here too.
+        for entry in get_compatible_custom_providers():
+            if isinstance(entry, dict):
+                ids.add(custom_provider_slug(str(entry.get("name") or ""), str(entry.get("provider_key") or "")))
     except _CONFIG_ERRORS:
         pass
     return ids
