@@ -125,9 +125,18 @@ def _custom_provider_entries(cfg: Dict[str, Any], names: Iterable[str]) -> Itera
 
 
 def _custom_provider_list(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Dict entries of the legacy ``custom_providers`` list (empty when absent/malformed)."""
-    raw = cfg.get("custom_providers")
-    return [e for e in raw if isinstance(e, dict)] if isinstance(raw, list) else []
+    """Dict entries of the compatible custom-provider view (legacy list + providers + shared).
+
+    2026-09-12 local patch (share-env): read through ``get_compatible_custom_providers`` so
+    providers defined in the shared file are visible here too; fall back to the raw legacy
+    list on any failure.
+    """
+    try:
+        from hermes_cli.config import get_compatible_custom_providers
+        return [e for e in get_compatible_custom_providers(cfg) if isinstance(e, dict)]
+    except Exception:
+        raw = cfg.get("custom_providers")
+        return [e for e in raw if isinstance(e, dict)] if isinstance(raw, list) else []
 
 
 def _supports_vision_override(
