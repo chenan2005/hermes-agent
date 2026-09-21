@@ -80,7 +80,7 @@ def _trigger_triage(conn, tid, *, kind=None, reason="x"):
 
 def test_low_recurrence_stays_blocked(kanban_home: Path) -> None:
     """At 2 recurrences (below BLOCK_RECURRENCE_LIMIT), stays blocked, not triage."""
-    with kb.connect_closing() as conn:
+    with kbc.connect_closing() as conn:
         tid = _running_task(conn)
         kb.block_task(conn, tid, reason="need creds", kind="needs_input")
         kb.unblock_task(conn, tid)
@@ -96,7 +96,7 @@ def test_low_recurrence_stays_blocked(kanban_home: Path) -> None:
 
 def test_same_cause_reblock_routes_to_triage(kanban_home: Path) -> None:
     """Block/unblock loop reaches BLOCK_RECURRENCE_LIMIT → triage."""
-    with kb.connect_closing() as conn:
+    with kbc.connect_closing() as conn:
         tid = _running_task(conn)
         _trigger_triage(conn, tid, kind="needs_input", reason="need creds")
         t = kb.get_task(conn, tid)
@@ -106,7 +106,7 @@ def test_same_cause_reblock_routes_to_triage(kanban_home: Path) -> None:
 
 def test_untyped_block_loop_also_protected(kanban_home: Path) -> None:
     """Legacy un-typed blocks (kind=None) still trip the breaker at the limit."""
-    with kb.connect_closing() as conn:
+    with kbc.connect_closing() as conn:
         tid = _running_task(conn)
         _trigger_triage(conn, tid, kind=None, reason="a")
         assert kb.get_task(conn, tid).status == "triage"
@@ -114,7 +114,7 @@ def test_untyped_block_loop_also_protected(kanban_home: Path) -> None:
 
 def test_different_kinds_do_not_compound(kanban_home: Path) -> None:
     """A re-block for a DIFFERENT reason resets the counter to 1."""
-    with kb.connect_closing() as conn:
+    with kbc.connect_closing() as conn:
         tid = _running_task(conn)
         kb.block_task(conn, tid, reason="a", kind="needs_input")
         kb.unblock_task(conn, tid)
@@ -165,13 +165,18 @@ def test_dependency_then_parent_done_promotes(kanban_home: Path) -> None:
 
 
 def test_dependency_block_with_terminal_parents_parks_then_escalates(
-    kanban_home: Path, capsys: pytest.CaptureFixture[str],
+    kanban_home: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ``dependency`` block whose parents are all terminal can never be
     satisfied by ``recompute_ready``: it must park in ``blocked`` as
     ``needs_input`` (no ``dependency_wait``, no re-promotion), say so on the
     CLI, and count toward the loop breaker so a re-block after an unblock
     reaches ``triage``."""
+    # 2026-09-21 local patch: our carried commit raises BLOCK_RECURRENCE_LIMIT
+    # (2→30→80) so pipeline review loops don't false-triage. Pin the upstream
+    # value here so this test still exercises the escalation path instead of
+    # asserting a 2-recurrence triage that no longer happens at 80.
+    monkeypatch.setattr(kb, "BLOCK_RECURRENCE_LIMIT", 2)
     with kbc.connect_closing() as conn:
         parent = kb.create_task(conn, title="already-done-parent", assignee="worker")
         with kb.write_txn(conn):
