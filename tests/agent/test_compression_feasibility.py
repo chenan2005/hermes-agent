@@ -19,9 +19,17 @@ from agent.context_compressor import ContextCompressor
 @pytest.fixture(autouse=True)
 def _stable_aux_provider_config():
     """Keep feasibility tests independent from the developer's config.yaml."""
-    with patch(
-        "agent.auxiliary_client._resolve_task_provider_model",
-        return_value=("auto", None, None, None, None),
+    with (
+        patch(
+            "agent.auxiliary_client._resolve_task_provider_model",
+            return_value=("auto", None, None, None, None),
+        ),
+        # 2026-09-21 local patch (share-env): the shared custom-providers file
+        # (~/.hermes/shared-env/custom_providers.yaml) merges into
+        # get_compatible_custom_providers() as a read-only baseline, so the
+        # developer's real providers would leak into assertions that expect an
+        # empty custom_providers list. Neutralise the shared file here.
+        patch("hermes_cli.config_providers._load_shared_custom_providers", return_value=[]),
     ):
         yield
 

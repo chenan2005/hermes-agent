@@ -165,13 +165,18 @@ def test_dependency_then_parent_done_promotes(kanban_home: Path) -> None:
 
 
 def test_dependency_block_with_terminal_parents_parks_then_escalates(
-    kanban_home: Path, capsys: pytest.CaptureFixture[str],
+    kanban_home: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ``dependency`` block whose parents are all terminal can never be
     satisfied by ``recompute_ready``: it must park in ``blocked`` as
     ``needs_input`` (no ``dependency_wait``, no re-promotion), say so on the
     CLI, and count toward the loop breaker so a re-block after an unblock
     reaches ``triage``."""
+    # 2026-09-21 local patch: our carried commit raises BLOCK_RECURRENCE_LIMIT
+    # (2→30→80) so pipeline review loops don't false-triage. Pin the upstream
+    # value here so this test still exercises the escalation path instead of
+    # asserting a 2-recurrence triage that no longer happens at 80.
+    monkeypatch.setattr(kb, "BLOCK_RECURRENCE_LIMIT", 2)
     with kbc.connect_closing() as conn:
         parent = kb.create_task(conn, title="already-done-parent", assignee="worker")
         with kb.write_txn(conn):
