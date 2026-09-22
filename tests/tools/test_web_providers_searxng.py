@@ -246,6 +246,12 @@ class TestSearXNGOnlyExtractCrawlErrors:
 
         monkeypatch.setattr(web_tools, "async_is_safe_url", _allow_ssrf)
         monkeypatch.setattr("tools.interrupt.is_interrupted", lambda: False, raising=False)
+        # 2026-09-22 local patch: our search-only fallback chain tries the local
+        # browser (tools/web_tools.py::_browser_extract_fallback) before
+        # reporting the error. Disable it so this test still asserts the
+        # terminal search-only error path instead of doing a real page fetch.
+        # (Same adaptation as tests/tools/test_web_providers_brave_free.py.)
+        monkeypatch.setattr(web_tools, "_browser_extract_fallback", lambda urls: None)
 
         result_str = asyncio.get_event_loop().run_until_complete(
             web_tools.web_extract_tool(["https://example.com"])
