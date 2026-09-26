@@ -335,8 +335,8 @@ def _load_shared_custom_providers() -> List[Dict[str, Any]]:
         cache_key = (st.st_mtime_ns, st.st_size)
         if _SHARED_PROVIDERS_CACHE["key"] == cache_key:
             return _SHARED_PROVIDERS_CACHE["entries"]
-        import yaml
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        from hermes_yaml import safe_load
+        data = safe_load(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):  # tolerate a wrapped ``custom_providers:`` form
             data = data.get("custom_providers")
         entries: List[Dict[str, Any]] = []
