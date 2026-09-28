@@ -329,7 +329,8 @@ def _load_shared_custom_providers() -> List[Dict[str, Any]]:
     resolution survives a bad shared file.
     """
     from pathlib import Path
-    path = Path.home() / ".hermes" / "shared-env" / "custom_providers.yaml"
+    from hermes_cli.env_loader import _shared_env_main_root
+    path = _shared_env_main_root() / "shared-env" / "custom_providers.yaml"
     try:
         st = path.stat()
         cache_key = (st.st_mtime_ns, st.st_size)

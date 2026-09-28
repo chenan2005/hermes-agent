@@ -452,6 +452,23 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
         pass  # best-effort — don't block gateway startup
 
 
+def _shared_env_main_root() -> Path:
+    """Main (non-profile) Hermes root for shared-env files.
+
+    ``get_default_hermes_root()`` honors a sandboxed ``HERMES_HOME`` (tests)
+    while resolving to ``~/.hermes`` in production — the production semantics
+    are identical to the old hardcoded ``Path.home() / ".hermes"``, but the
+    upstream ``tests/home_io_guard`` isolation now sees a temp home instead of
+    the real one.
+    """
+    try:
+        from hermes_constants import get_default_hermes_root
+
+        return get_default_hermes_root()
+    except Exception:
+        return Path.home() / ".hermes"
+
+
 def _resolve_shared_env_path(main_config: Path) -> Path | None:
     """Resolve the shared env file from main config ``share_env.file``.
 
@@ -464,7 +481,7 @@ def _resolve_shared_env_path(main_config: Path) -> Path | None:
     consistently across all entrypoints. ``read_user_config_raw`` is used to
     avoid recursion (no expansion, no caching).
     """
-    default = Path.home() / ".hermes" / "shared-env" / ".env"
+    default = _shared_env_main_root() / "shared-env" / ".env"
     try:
         from hermes_cli.config import read_user_config_raw
 
@@ -475,7 +492,7 @@ def _resolve_shared_env_path(main_config: Path) -> Path | None:
         val = str(raw_v or "").strip()
         if val:
             p = Path(val).expanduser()
-            return p if p.is_absolute() else Path.home() / ".hermes" / p
+            return p if p.is_absolute() else _shared_env_main_root() / p
     except Exception:
         pass
     return default
@@ -538,9 +555,9 @@ def load_hermes_dotenv(
     # Path from main config (share_env.file), default ~/.hermes/shared-env/.env.
     # Missing file = silent no-op (user requirement).
     try:
-        shared_env = _resolve_shared_env_path(Path.home() / ".hermes" / "config.yaml")
+        shared_env = _resolve_shared_env_path(_shared_env_main_root() / "config.yaml")
     except Exception:
-        shared_env = Path.home() / ".hermes" / "shared-env" / ".env"
+        shared_env = _shared_env_main_root() / "shared-env" / ".env"
     if shared_env is not None and shared_env.exists():
         _sanitize_env_file_if_needed(shared_env)
         _load_dotenv_with_fallback(shared_env, override=False)
